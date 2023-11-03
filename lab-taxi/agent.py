@@ -1,17 +1,19 @@
 import numpy as np
 from collections import defaultdict
 
+
 class Agent:
 
-    def __init__(self, nA=6):
+    def __init__(self, env, nA=6, nS=500):
         """ Initialize agent.
 
         Params
         ======
         - nA: number of actions available to the agent
         """
-        self.nA = nA
-        self.Q = defaultdict(lambda: np.zeros(self.nA))
+        env.nA = nA
+        self.env = env
+        self.Q = np.zeros((nS, nA))
 
     def select_action(self, state):
         """ Given the state, select an action.
@@ -24,7 +26,7 @@ class Agent:
         =======
         - action: an integer, compatible with the task's action space
         """
-        return np.random.choice(self.nA)
+        return self.env.action_space.sample()
 
     def step(self, state, action, reward, next_state, done):
         """ Update the agent's knowledge, using the most recently sampled tuple.
@@ -37,4 +39,4 @@ class Agent:
         - next_state: the current state of the environment
         - done: whether the episode is complete (True or False)
         """
-        self.Q[state][action] += 1
+        self.Q[state][action] += 0

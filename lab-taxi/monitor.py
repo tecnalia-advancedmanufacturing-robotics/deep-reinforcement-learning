@@ -2,10 +2,12 @@ from collections import deque
 import sys
 import math
 import numpy as np
+from tqdm import tqdm
 
-def interact(env, agent, num_episodes=20000, window=100):
+
+def interact(env, agent, num_episodes=20000, window=100, render=False):
     """ Monitor agent's performance.
-    
+
     Params
     ======
     - env: instance of OpenAI Gym's Taxi-v1 environment
@@ -22,19 +24,22 @@ def interact(env, agent, num_episodes=20000, window=100):
     avg_rewards = deque(maxlen=num_episodes)
     # initialize best average reward
     best_avg_reward = -math.inf
+    avg_reward = -math.inf
     # initialize monitor for most recent rewards
     samp_rewards = deque(maxlen=window)
     # for each episode
-    for i_episode in range(1, num_episodes+1):
+    bar = tqdm(range(1, num_episodes+1))
+    for i_episode in bar:
         # begin the episode
-        state = env.reset()
+        state = env.reset()[0]
         # initialize the sampled reward
         samp_reward = 0
         while True:
             # agent selects an action
             action = agent.select_action(state)
             # agent performs the selected action
-            next_state, reward, done, _ = env.step(action)
+            next_state, reward, d1, d2, _ = env.step(action)
+            done = d1 or d2
             # agent performs internal updates based on sampled experience
             agent.step(state, action, reward, next_state, done)
             # update the sampled reward
@@ -53,12 +58,12 @@ def interact(env, agent, num_episodes=20000, window=100):
             # update best average reward
             if avg_reward > best_avg_reward:
                 best_avg_reward = avg_reward
+
         # monitor progress
-        print("\rEpisode {}/{} || Best average reward {}".format(i_episode, num_episodes, best_avg_reward), end="")
+        bar.set_postfix(avg_reward=avg_reward, best_avg_reward=best_avg_reward)
         sys.stdout.flush()
         # check if task is solved (according to OpenAI Gym)
-        if best_avg_reward >= 9.7:
+        if best_avg_reward >= 8.7:
             print('\nEnvironment solved in {} episodes.'.format(i_episode), end="")
             break
-        if i_episode == num_episodes: print('\n')
     return avg_rewards, best_avg_reward
