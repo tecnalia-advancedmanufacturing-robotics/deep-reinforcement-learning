@@ -17,7 +17,11 @@ class QNetwork(nn.Module):
         super(QNetwork, self).__init__()
         self.seed = torch.manual_seed(seed)
         self.seq = nn.Sequential(
-            # TODO: Define your model architecture here
+            nn.Linear(state_size, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, action_size)
         )
 
     def forward(self, state):

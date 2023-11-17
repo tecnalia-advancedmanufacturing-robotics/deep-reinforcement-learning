@@ -91,13 +91,20 @@ class Agent():
             gamma (float): discount factor
         """
         states, actions, rewards, next_states, dones = experiences
+        N = states.shape[0]
 
-        ## TODO: compute and minimize the loss
-        "*** YOUR CODE HERE ***"
+        Q_targets_next = self.qnetwork_target(next_states).max(dim=1)[0]
+        target = rewards.flatten() + gamma * dones.flatten().logical_not() * Q_targets_next
+
+        prediction = self.qnetwork_local(states)[torch.arange(N), actions.flatten()]
+
+        loss = F.mse_loss(prediction, target.detach())
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+        self.writer.add_scalar('loss', loss, self.t_step)
 
         # ------------------- update target network ------------------- #
         self.soft_update(self.qnetwork_local, self.qnetwork_target, TAU)
