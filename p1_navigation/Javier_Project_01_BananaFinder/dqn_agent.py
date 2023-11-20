@@ -66,11 +66,9 @@ class Agent():
         self.memory.add(state, action, reward, next_state, done)
 
         # Learn once every "self.update_every" time steps
-        self.timestep += 1
+        self.timestep = (self.timestep + 1) % self.update_every
 
-        if self.timestep % self.update_every == 0:
-            self.timestep = 0
-
+        if self.timestep == 0:
             # If we have enough samples experienced, get a subset and learn
             if len(self.memory) > self.batch_size:
                 experiences = self.memory.sample()
@@ -94,11 +92,9 @@ class Agent():
         # Compute loss
         loss = F.mse_loss(Q_locals, Q_targets)
 
-        # Perform backpropagation
-        loss.backward()
-
-        # Reset gradients to zero
+        # Minimize loss
         self.optimizer.zero_grad()
+        loss.backward()
         self.optimizer.step()
 
         # Soft-update target model
