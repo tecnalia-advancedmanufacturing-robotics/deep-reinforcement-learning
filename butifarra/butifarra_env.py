@@ -1,3 +1,4 @@
+import gym
 import functools
 
 import gymnasium
@@ -92,14 +93,14 @@ def legal_moves(hand, table, trump):
     return legal_cards
 
 
-def ButifarraEnv(render_mode=None):
+def ButifarraEnv(*args, render_mode=None, **kwargs):
     """
     The env function often wraps the environment in wrappers by default.
     You can find full documentation for these methods
     elsewhere in the developer documentation.
     """
     internal_render_mode = render_mode if render_mode != "ansi" else "human"
-    env = raw_env(render_mode=internal_render_mode)
+    env = raw_env(*args, render_mode=internal_render_mode, **kwargs)
     # This wrapper is only for environments which print results to the terminal
     if render_mode == "ansi":
         env = wrappers.CaptureStdoutWrapper(env)
@@ -121,7 +122,7 @@ class raw_env(AECEnv):
 
     metadata = {"render_modes": ["human"], "name": "rps_v2"}
 
-    def __init__(self, render_mode=None, flatten=True):
+    def __init__(self, render_mode=None, flatten=True, action_mask_on_obs=True, bad_action_reward=-1):
         """
         The init method takes in environment arguments and
          should define the following attributes:
@@ -158,17 +159,22 @@ class raw_env(AECEnv):
         })
 
         self.flatten = flatten
+        self.action_mask_on_obs = action_mask_on_obs
+        self.bad_action_reward = bad_action_reward
 
         obs = self.obs
         if self.flatten:
             obs = spaces.flatten_space(self.obs)
 
+        if self.action_mask_on_obs:
+            obs = spaces.Dict({
+                "observation": obs,
+                "action_mask": spaces.MultiBinary(48),
+            })
+
         self._action_spaces = {agent: spaces.Discrete(48) for agent in self.possible_agents}
         self._observation_spaces = {
-            agent: spaces.Dict({
-                "observation": obs,
-                "action_mask": spaces.MultiBinary(48)
-            })
+            agent: obs
             for agent in self.possible_agents
         }
         self.render_mode = render_mode
@@ -228,12 +234,18 @@ class raw_env(AECEnv):
         if self.flatten:
             observation = spaces.flatten(self.obs, observation)
 
-        res = {
-            "observation": observation,
-            # Which are the legal moves
-            "action_mask": make_one_hot(legal_moves(self.hands[agent], self.table, self.trump)),
-        }
-        return res
+        if self.action_mask_on_obs:
+            return {
+                "observation": observation,
+                # Which are the legal moves
+                "action_mask": self.action_masks(agent),
+            }
+        else:
+            self.infos[agent]["action_mask"] = self.action_masks(agent)
+            return observation
+
+    def action_masks(self, agent):
+        return make_one_hot(legal_moves(self.hands[agent], self.table, self.trump))
 
     def close(self):
         """
@@ -287,8 +299,7 @@ class raw_env(AECEnv):
             self.failing_step(action)
         except (ValueError, IndexError) as e:
             # print(e)
-            self.rewards[self.agent_selection] = -1
-            self._accumulate_rewards()
+            self.rewards[self.agent_selection] = self.bad_action_reward
 
     def failing_step(self, action):
         """
@@ -372,6 +383,79 @@ class raw_env(AECEnv):
         self.agent_selection = self._agent_selector.next()
 
 
+class ButifarraGymEnv(gymnasium.Env):
+    def __init__(self, agent=None, other_act_fn=None, **kwargs):
+        self.env = ButifarraEnv(**kwargs)
+        self.env.reset()
+        if agent is None:
+            self.agent = self.env.agent_selection
+        else:
+            self.agent = agent
+        self.other_act_fn = other_act_fn
+        self.action_space = self.env.action_space(self.agent)
+        self.observation_space = self.env.observation_space(self.agent)
+
+    def other_step(self):
+        state, reward, d1, d2, info = self.env.last()
+        if d1 or d2:
+            return self.env.step(None)
+        if self.other_act_fn is not None:
+            action = self.other_act_fn(state, info)
+            return self.env.step(action)
+        action_mask = None
+        if "action_mask" in info:
+            action_mask = info["action_mask"]
+        if "action_mask" in state:
+            action_mask = state["action_mask"]
+        action = self.env.action_space(self.env.agent_selection).sample(action_mask)
+        self.env.step(action)
+
+    def step(self, action):
+        while self.agent != self.env.agent_selection:
+            self.other_step()
+        self.env.step(action)
+        while self.agent != self.env.agent_selection:
+            self.other_step()
+        return self.env.last()
+
+    def reset(self, **kwargs):
+        super().reset(**kwargs)
+        self.env.reset(**kwargs)
+        state, reward, d1, d2, info = self.env.last()
+        return state, info
+
+    def action_masks(self):
+        return self.env.unwrapped.action_masks(self.agent)
+
+    def render(self):
+        return self.env.render()
+
+
 if __name__ == "__main__":
     import pettingzoo.test
-    pettingzoo.test.api_test(ButifarraEnv(), num_cycles=10)
+    pettingzoo.test.api_test(ButifarraEnv(action_mask_on_obs=True), num_cycles=10)
+
+    import gymnasium.utils.env_checker
+    gymnasium.utils.env_checker.check_env(ButifarraGymEnv())
+
+    # env = ButifarraGymEnv(render_mode="ansi")
+    # state, info = env.reset()
+    # score = 0
+    # for _ in range(1000):
+    #     print(env.render())
+    #     print(f"Score: {score}")
+    #     action = get_action(input("Card: "))
+    #     # action = env.action_space.sample(state["action_mask"])
+    #     state, reward, terminated, truncated, info = env.step(action)
+    #     score += reward
+    #     if terminated or truncated:
+    #         print(env.render())
+    #         print(f"Score: {score}")
+    #         break
+
+    # env = ButifarraEnv()
+    # env.reset()
+    # for agent_name in env.agent_iter():
+    #     next_state, reward, d1, d2, info = env.last()
+    #     print(info)
+    #     break

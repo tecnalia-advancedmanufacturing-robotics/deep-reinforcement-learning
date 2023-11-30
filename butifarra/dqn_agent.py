@@ -52,7 +52,7 @@ class RandomAgent():
 class Agent():
     """Interacts with and learns from the environment."""
 
-    def __init__(self, state_size, action_size, seed, suffix='dqn', use_mask=False):
+    def __init__(self, state_size, action_size, seed, suffix='dqn', use_mask=True):
         """Initialize an Agent object.
 
         Params
@@ -73,7 +73,7 @@ class Agent():
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR, weight_decay=1e-5)
 
         # Replay memory
-        self.memory = PriorityReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed)
+        self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed)
         # Initialize time step (for updating every UPDATE_EVERY steps)
         self.t_step = 0
         self.t_epsiode = 0
@@ -84,7 +84,14 @@ class Agent():
             priority = self.compute_priority(state, action, reward, next_state)
             self.memory.add(state, action, reward, next_state, done, priority)
         else:
-            self.memory.add(state, action, reward, next_state, done)
+            mask = None
+            if isinstance(state, dict):
+                mask = state["action_mask"]
+                state = state["observation"]
+            if isinstance(next_state, dict):
+                next_mask = next_state["action_mask"]
+                next_state = next_state["observation"]
+            self.memory.add(state, action, reward, next_state, done, mask, next_mask)
 
         self.t_step += 1
         if self.t_step % UPDATE_EVERY == 0:
@@ -143,13 +150,16 @@ class Agent():
             experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples
             gamma (float): discount factor
         """
-        try:
+
+        if isinstance(self.memory, PriorityReplayBuffer):
             states, actions, rewards, next_states, dones, probs, indices = experiences
-        except ValueError:
-            states, actions, rewards, next_states, dones = experiences
+        else:
+            states, actions, rewards, next_states, dones, masks, next_masks = experiences
+
         N = states.shape[0]
 
         target_pred = self.qnetwork_local(next_states)
+        target_pred[~next_masks.bool()] = -np.inf
         best_actions = target_pred.argmax(dim=1)
 
         Q_targets_next = self.qnetwork_target(next_states)[torch.arange(N), best_actions.flatten()]
@@ -205,12 +215,21 @@ class ReplayBuffer:
         self.action_size = action_size
         self.memory = deque(maxlen=buffer_size)
         self.batch_size = batch_size
-        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
+        self.experience = namedtuple(
+            "Experience",
+            field_names=[
+                "state",
+                "action",
+                "reward",
+                "next_state",
+                "done",
+                "mask",
+                "next_mask"])
         self.seed = random.seed(seed)
 
-    def add(self, state, action, reward, next_state, done):
+    def add(self, state, action, reward, next_state, done, mask=None, next_mask=None):
         """Add a new experience to memory."""
-        e = self.experience(state, action, reward, next_state, done)
+        e = self.experience(state, action, reward, next_state, done, mask, next_mask)
         self.memory.append(e)
 
     def sample(self):
@@ -218,14 +237,16 @@ class ReplayBuffer:
         experiences = random.sample(self.memory, k=self.batch_size)
 
         states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(device)
+        actions = torch.from_numpy(np.vstack([e.action if e.action is not None else -1 for e in experiences if e is not None])).long().to(device)
         rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
         next_states = torch.from_numpy(
             np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
         dones = torch.from_numpy(
             np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
+        masks = torch.from_numpy(np.vstack([e.mask for e in experiences if e is not None])).float().to(device)
+        next_masks = torch.from_numpy(np.vstack([e.next_mask for e in experiences if e is not None])).float().to(device)
 
-        return (states, actions, rewards, next_states, dones)
+        return (states, actions, rewards, next_states, dones, masks, next_masks)
 
     def __len__(self):
         """Return the current size of internal memory."""

@@ -17,7 +17,9 @@ class QNetwork(nn.Module):
         super(QNetwork, self).__init__()
         self.seed = torch.manual_seed(seed)
         self.seq = nn.Sequential(
-            nn.Linear(state_size, 128),
+            nn.Linear(state_size, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
